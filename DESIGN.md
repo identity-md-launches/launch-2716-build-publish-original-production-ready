@@ -47,6 +47,7 @@ Radii are `--radius-sm` 10 px (buttons, tip, level tiles), `--radius-md` 14 px (
 - **Board** `src/components/Board.tsx`: an SVG of 100-unit tiles, with sprites moved by CSS `transform` (140 ms transition, off under reduced motion). It's a `role="img"` with a text summary. Moves are announced through a polite `role="status"` region.
 - **Result panel** `.result`: won, caught or out, each with verb-first actions (Play next level, Copy result link, Undo, Restart).
 - **Card** `.card`: the side column's live status (with **Wheel** `src/components/Wheel.tsx`), frozen rules, shared result, daily challenge and level grid.
+- **Daily disclosure** (`src/App.tsx`, `src/i18n.ts`): an active daily card uses the attempt's frozen date and anchor, with the entire transaction hash visible. Reuse `.small` and its `overflow-wrap: anywhere` for long public values; do not shorten or ellipsize the hash. The seed, level and primary action stay together below the source. English and Chinese wrapping was inspected at 390 and 1440 in Chromium and WebKit after the state fixes; no new tokens or layout changes were needed.
 - **Level tile** `.lvl`: number plus stars, `aria-current` on the current level, and an `aria-label` that includes the star count.
 - **About dialog**: native `<dialog>` with `showModal()`. Escape closes it and focus returns to the trigger.
 

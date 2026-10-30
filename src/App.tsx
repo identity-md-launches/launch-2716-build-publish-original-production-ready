@@ -17,6 +17,8 @@ interface Run {
   source: Source;
   /** practice chosen only because live data was not ready yet */
   auto: boolean;
+  /** A successful move permanently touches this attempt, even after undo. */
+  touched: boolean;
   frozenStatus: string | null;
   frozenAt: string | null;
   hist: History;
@@ -42,7 +44,10 @@ export default function App() {
   const pollTimer = useRef<number>();
 
   const [progress, setProgress] = useState(loadProgress);
-  const [verdict, setVerdict] = useState<{ v: Verdict; hash: string } | null>(null);
+  const [verdict, setVerdict] = useState<{ v: Verdict; hash: string } | null>(() => {
+    const parsed = parseHash(location.hash);
+    return parsed?.moves ? { v: verifyReplay(parsed.attempt, parsed.moves), hash: location.hash } : null;
+  });
   const [announce, setAnnounce] = useState('');
   const [copyMsg, setCopyMsg] = useState('');
   const [, force] = useState(0);
@@ -108,6 +113,7 @@ export default function App() {
         attempt: full,
         source,
         auto,
+        touched: false,
         frozenStatus: source === 'live' ? snap!.coreStatus : null,
         frozenAt: source === 'live' ? snap!.observedAt : null,
         hist: new History(initialState(boardFor(full))),
@@ -118,51 +124,55 @@ export default function App() {
 
   const [run, setRun] = useState<Run>(() => {
     const parsed = parseHash(location.hash);
-    if (parsed) {
-      if (parsed.moves) setTimeout(() => setVerdict({ v: verifyReplay(parsed.attempt, parsed.moves!), hash: location.hash }));
-      const a = parsed.attempt;
-      return {
-        attempt: a,
-        source: 'shared',
-        auto: false,
-        frozenStatus: null,
-        frozenAt: null,
-        hist: new History(initialState(boardFor(a))),
-      };
-    }
-    return {
-      attempt: { kind: 'level', level: 0, sym: 0, variant: 'nap' },
-      source: 'practice',
-      auto: true,
-      frozenStatus: null,
-      frozenAt: null,
-      hist: new History(initialState(boardFor({ level: 0, sym: 0 }))),
-    };
+    return parsed ? makeRun(parsed.attempt, true) : makeRun({ kind: 'level', level: 0, sym: 0 });
   });
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseHash(location.hash);
+      if (!parsed) return;
+      setRun(makeRun(parsed.attempt, true));
+      setVerdict(parsed.moves ? { v: verifyReplay(parsed.attempt, parsed.moves), hash: location.hash } : null);
+      setCopyMsg('');
+      setAnnounce('');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [makeRun]);
 
   const startLevel = (level: number) => {
     setRun(makeRun({ kind: 'level', level, sym: 0 }));
+    setVerdict(null);
     history.replaceState(null, '', location.pathname + location.search);
     setCopyMsg('');
   };
 
   const daily = useMemo(() => {
+    if (run.attempt.kind === 'daily') {
+      const date = run.attempt.date!;
+      const anchor = run.attempt.anchor ?? null;
+      const stored = loadDailyAnchor(date);
+      const block = stored?.anchor === anchor ? stored.block : live?.anchorTx === anchor ? live.anchorBlock : null;
+      return { ...dailySeed(date, anchor), block };
+    }
     const date = utcDate(now);
     const stored = loadDailyAnchor(date);
     if (stored) return { ...dailySeed(date, stored.anchor), block: stored.block };
     return { ...dailySeed(date, live?.anchorTx ?? null), block: live?.anchorBlock ?? null };
-  }, [now, live]);
+  }, [now, live, run.attempt]);
 
   const startDaily = () => {
     const date = daily.date;
-    if (!loadDailyAnchor(date) && daily.anchor) saveDailyAnchor(date, { anchor: daily.anchor, block: daily.block });
+    if (!loadDailyAnchor(date)) saveDailyAnchor(date, { anchor: daily.anchor, block: daily.block });
     setRun(makeRun({ kind: 'daily', level: daily.level, sym: daily.sym, date, anchor: daily.anchor }));
+    setVerdict(null);
+    history.replaceState(null, '', location.pathname + location.search);
     setCopyMsg('');
   };
 
   const restart = () => {
     if (run.source === 'shared') {
-      setRun({ ...run, hist: new History(initialState(boardFor(run.attempt))) });
+      setRun({ ...run, touched: false, hist: new History(initialState(boardFor(run.attempt))) });
     } else {
       const { variant: _v, ...rest } = run.attempt;
       setRun(makeRun(rest));
@@ -172,7 +182,7 @@ export default function App() {
 
   // Upgrade an untouched auto-practice attempt once live data arrives.
   useEffect(() => {
-    if (run.auto && run.hist.current.moves === 0 && usableLive(live, Date.now())) {
+    if (run.auto && !run.touched && usableLive(live, Date.now())) {
       const { variant: _v, ...rest } = run.attempt;
       setRun(makeRun(rest));
     }
@@ -210,7 +220,7 @@ export default function App() {
         return;
       }
       run.hist.push(n, d);
-      force((x) => x + 1);
+      setRun({ ...run, touched: true });
       const rescued = n.pups !== cur.pups;
       if (n.status === 'won') {
         beep('win');
@@ -492,7 +502,7 @@ export default function App() {
             <h2 id="daily-h">{t.dailyTitle}</h2>
             <p className="small">
               {daily.anchor
-                ? fmt(t.dailySourceAnchor, { date: daily.date, tx: `${daily.anchor.slice(0, 10)}…${daily.anchor.slice(-6)}`, block: daily.block ?? '–' })
+                ? fmt(t.dailySourceAnchor, { date: daily.date, tx: daily.anchor, block: daily.block ?? '–' })
                 : fmt(t.dailySourceDate, { date: daily.date })}
             </p>
             <p className="small">

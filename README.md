@@ -22,10 +22,10 @@ The game opens straight into Level 1. There's no wallet, token, payment, prize o
   - `SPINNING` → **wheel route**. Wheel bridges are down, and an energy bonus adds +2 moves to the budget.
   - `IDLE` → **nap route**. Sleeping gates are open and bridges are up.
 
-  A live change during an attempt never alters its rules. One exception: if Level 1 started before the first response arrived and you haven't moved yet, it switches to live rules when the data lands.
+  A live change during an attempt never alters its rules. An automatic practice attempt can switch to live rules only before its first successful move. Undoing back to zero does not make it untouched again; use Restart to snapshot new live rules after playing.
 - **Practice mode:** used when the API fails, the data is stale, or `coreStatus` is missing or unrecognised. You can also choose it yourself. It's labelled "Practice mode", you pick the route, and no live values are shown or invented.
-- **Daily challenge:** the seed is FNV-1a of `squeek-burrow:<UTC date>:<anchor>`, where `<anchor>` is `builder.anchor.transactionHash` (the Squeekchain settlement anchor tx). It picks a level and one of 8 rotations or mirrors, which keep both routes solvable at the same par (tested). The anchor is frozen per UTC date in `localStorage` the first time the daily is opened. The UI shows its source (tx and block height). If the API was unavailable, the seed is date-only and the UI says so.
-- **Share and replay:** after a win, "Copy result link" creates `#level?l=…&v=…&m=<moves>` (or `#daily?d=…&a=<anchor>…`). Opening that link replays the moves in the browser under the frozen route and shows whether the result verifies. **Scores are local only. There is no authenticated global leaderboard and no multiplayer.**
+- **Daily challenge:** the seed is FNV-1a of `squeek-burrow:<UTC date>:<anchor>`, where `<anchor>` is `builder.anchor.transactionHash` (the Squeekchain settlement anchor tx), or the literal `date-only` when no anchor was available. It picks a level and one of 8 rotations or mirrors, which keep both routes solvable at the same par (tested). The first local daily selection is saved per UTC date, including `{anchor: null, block: null}` for a date-only challenge. Recovery, reopening and reloading preserve that selection. While a daily is active, the card discloses that attempt's date, seed and complete transaction hash, including for older shared challenges. An unknown block height is shown as `–`, never inferred from a different anchor. Outside a daily, the card offers today's saved selection or a preview from the current feed.
+- **Share and replay:** after a win, "Copy result link" creates `#level?l=…&v=…&m=<moves>` (or `#daily?d=…&a=<anchor>…`). Opening that link replays the moves in the browser under the frozen route and shows whether the result verifies. Same-document hash navigation, including browser Back, loads the linked challenge and recomputes its verdict. Selecting another level or daily clears the previous verdict. **Scores are local only. There is no authenticated global leaderboard and no multiplayer.**
 
 ## Install, preview, rebuild
 
@@ -35,19 +35,20 @@ npm run dev       # local dev server
 npm run build     # tsc --noEmit + vite build -> dist/ (relative asset URLs, base "./")
 npm run preview   # serve the built dist/
 npm test          # vitest: engine, solver, live API, replay tests
+npm test -- tests/App.test.tsx  # 18 attempt, daily and shared-navigation regressions
 npm run typecheck
 ```
 
 `dist/` is committed and works from any static host or IPFS gateway subpath. Routing is hash-only.
 
-## Tests and results (recorded 2026-10-30)
+## Tests and results (revision checked 2026-10-30)
 
 | Command | Result |
 | --- | --- |
-| `npm test` (vitest 2.1.9) | 3 files, **61 tests passed**: every level × both routes solves at the stored par within budget; every level is unsolvable with both bridges and sleeping gates shut; all 12 levels × 8 symmetries × 2 routes keep par; movement, walls, budget, crates, plates, gates, beetles, catching, win, undo, stars; live parsing against the real captured response, missing fields stay null, unknown status, staleness, backoff, HTTP 503, timeout abort and network error; daily seed reproducibility; share-URL round trip; replay verification and rejection of tampered replays |
-| `npx tsc --noEmit` | exit 0 |
-| `npx vite build` | ok: `dist/index.html`, 1 CSS file (~10 kB), 1 JS file (~180 kB, 60 kB gzip) |
-| Browser interaction script (Playwright + Chromium against the built `dist/` served under `/preview/`; the script lives in a scratch folder and is not committed) | 33 of 34 checks passed (details in `docs/VALIDATION.md`) |
+| `npm test` (vitest 2.1.9) | 4 files, **79 tests passed**: all original 61 engine, solver, live API and replay tests, plus 18 mounted-app regressions for daily persistence/disclosure, UTC rollover, shared hash navigation, verdict clearing, restored practice preferences, and rules frozen through undo |
+| `npm run typecheck` | exit 0 |
+| `npm run build` | exit 0: `dist/index.html`, 1 CSS file (10.29 kB), 1 JS file (180.82 kB, 60.33 kB gzip) |
+| Browser interaction script (Playwright against the built `dist/` served under `/preview/`; scratch script, not committed) | **26/26 scenarios passed**: 13 Chromium + 13 WebKit, including all reported reproductions at 390×844 and 1440×900, touch controls, keyboard wins on both routes, replay links, progress, dialog focus, reduced motion, and reflow at 320 and 960. Details in `docs/VALIDATION.md`. |
 | Design probe `taste.mjs` | 16/16 checks passed |
 
-Limitations: tests ran in headless Chromium with emulated mobile and touch, not on physical devices. There was no screen-reader session. The live hamster was `IDLE` during testing, so the `SPINNING` path was checked with a mocked API response.
+Limitations: tests ran in headless Chromium and WebKit with emulated touch, not on physical devices. There was no screen-reader session or native 200% zoom check. The live hamster was `IDLE` during testing, so controlled outage/recovery and `SPINNING` transitions used mocked API responses. Daily persistence across reloads requires available `localStorage`; shared URLs carry the date and anchor independently. The export is ready for the assignment's IPFS publisher; the hosted address is assigned after submission.
