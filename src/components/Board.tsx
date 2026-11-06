@@ -1,4 +1,4 @@
-import { Board as BoardData, GameState, SIZE, Variant, gatesOpen, xy } from '../game/engine';
+import { Board as BoardData, GameState, SIZE, Variant, deadCorners, gatesOpen, predictBeetles, xy } from '../game/engine';
 import { Beetle, Crate, Hamster, Nest, Pup } from './Art';
 
 interface Props {
@@ -16,6 +16,8 @@ const pos = (i: number) => {
 
 export function BoardView({ board, state, variant, label }: Props) {
   const open = gatesOpen(board, state.crates);
+  const corners = deadCorners(board, variant);
+  const predicted = predictBeetles(board, state, variant);
   const tiles = board.terrain.map((t, i) => {
     const [x, y] = xy(i);
     const key = `t${i}`;
@@ -93,6 +95,10 @@ export function BoardView({ board, state, variant, label }: Props) {
     <svg className="board" viewBox={`0 0 ${SIZE * T} ${SIZE * T}`} role="img" aria-label={label}>
       <rect width={SIZE * T} height={SIZE * T} rx="20" fill="#d9bc8c" />
       {tiles}
+      {state.crates.length > 0 && corners.map((i) => {
+        const [x, y] = xy(i);
+        return <g key={`corner${i}`} className="corner-mark" transform={`translate(${x * T + 80} ${y * T + 20})`} aria-hidden="true"><path d="M-8 0h16M0-8v16" stroke="#9a3412" strokeWidth="4" transform="rotate(45)" /></g>;
+      })}
       {board.pups.map((p, k) =>
         state.pups & (1 << k) ? (
           <g key={`p${k}`} className="sprite pop" style={{ transform: pos(p) }}>
@@ -103,11 +109,16 @@ export function BoardView({ board, state, variant, label }: Props) {
       {state.crates.map((c, k) => (
         <g key={`c${k}`} className="sprite" style={{ transform: pos(c) }}>
           <Crate />
+          {corners.includes(c) && <g className="stuck-crate"><path d="M76 5L96 40H56z" fill="#9a3412" /><path d="M76 15v11m0 5v2" stroke="#ffffff" strokeWidth="4" /></g>}
         </g>
       ))}
       {state.beetles.map((b, k) => (
         <g key={`b${k}`} className="sprite" style={{ transform: pos(b.p) }}>
           <Beetle />
+          <g className="beetle-arrow" aria-hidden="true" transform={`translate(50 16) rotate(${predicted[k].p === b.p ? 0 : predicted[k].dx === 1 ? 90 : predicted[k].dx === -1 ? 270 : predicted[k].dy === 1 ? 180 : 0})`}>
+            <circle r="15" fill="#fffaf0" />
+            {predicted[k].p === b.p ? <path d="M-5-6v12M5-6v12" stroke="#234e4a" strokeWidth="4" /> : <path d="M0-10L-8 0h5v9h6V0h5z" fill="#234e4a" />}
+          </g>
         </g>
       ))}
       <g className={`sprite hamster ${state.status}`} style={{ transform: pos(state.h) }}>

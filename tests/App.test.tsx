@@ -3,6 +3,9 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
+import { boardFor, dailyV2Seed, settlementSeed, shareHash, verifyReplay } from '../src/game/challenge';
+import { solve } from '../src/game/solver';
+import { Dir } from '../src/game/engine';
 
 vi.mock('../src/sound', () => ({ play: vi.fn() }));
 
@@ -73,85 +76,75 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe('frozen daily selection and disclosure', () => {
-  it('saves a date-only daily and keeps its board, seed and source after recovery and reopening', async () => {
+describe('date-only Daily v2 and preserved legacy disclosure', () => {
+  const seed = dailyV2Seed(DATE).seed.toString(16).padStart(8, '0');
+  it('uses a UTC-only daily, unchanged after feed recovery, route preferences and reopening', async () => {
     await mount();
     await clickButton('Play daily challenge');
-    expect(savedDaily()).toEqual({ anchor: null, block: null });
-    expect(dailyText()).toContain('cc4cbe1a');
-    await clickButton('Move down');
+    expect(savedDaily()).toBeNull();
+    expect(dailyText()).toContain(seed);
+    expect(routeLabel()).toBe('Nap route');
     const before = boardLabel();
-    response = live('IDLE');
+    response = live('SPINNING');
     await clickButton('Check now');
     expect(boardLabel()).toBe(before);
-    expect(dailyText()).toContain('cc4cbe1a');
-    expect(dailyText()).toContain('UTC date 2026-10-30 only');
+    expect(dailyText()).toContain(seed);
     expect(dailyText()).not.toContain(ANCHOR);
     await clickButton('Play daily challenge');
-    expect(boardLabel()).toContain('Moves: 0/30');
-    expect(dailyText()).toContain('cc4cbe1a');
-    await clickButton('2');
-    expect(dailyText()).toContain('cc4cbe1a');
-    expect(savedDaily()).toEqual({ anchor: null, block: null });
+    expect(boardLabel()).toBe(before);
   });
-
-  it('discloses an older shared daily from the attempt, including the full transaction hash', async () => {
+  it('discloses an older legacy daily, including the complete original anchor', async () => {
     response = live('IDLE');
     await mount(`#daily?d=2026-10-29&a=${OLD_ANCHOR}&v=n`);
     expect(boardLabel()).toContain('2026-10-29');
-    expect(dailyText()).toContain('2026-10-29');
     expect(dailyText()).toContain('e9d64c93');
-    expect(dailyText()).toContain('Level 8');
+    expect(dailyText()).toContain('Pantry run');
     expect(dailyText()).toContain(OLD_ANCHOR);
     expect(dailyText()).not.toContain(ANCHOR);
     expect(dailyText()).not.toContain('block 4135');
+    await clickButton('Play daily challenge');
+    expect(boardLabel()).toContain(DATE);
+    expect(dailyText()).toContain(seed);
+    expect(dailyText()).not.toContain(OLD_ANCHOR);
   });
-
-  it('restores the first date-only selection after reloading while the API has recovered', async () => {
+  it('has the same daily after reload, irrespective of old locally saved anchors', async () => {
+    localStorage.setItem(`sbr:daily:${DATE}`, JSON.stringify({ anchor: ANCHOR, block: '4135' }));
     await mount();
     await clickButton('Play daily challenge');
+    const before = boardLabel();
     await act(async () => root.unmount());
     root = createRoot(host);
-    response = live('IDLE');
-    await mount();
-    expect(dailyText()).toContain('cc4cbe1a');
-    await clickButton('Play daily challenge');
-    expect(boardLabel()).toContain('Moves: 0/30');
-    expect(dailyText()).toContain('UTC date 2026-10-30 only');
-  });
-
-  it('freezes a chain anchor and its block despite later anchor updates', async () => {
-    response = live('IDLE');
-    await mount();
-    await clickButton('Play daily challenge');
-    expect(savedDaily()).toEqual({ anchor: ANCHOR, block: '4135' });
     response = live('SPINNING', OLD_ANCHOR);
-    await clickButton('Check now');
-    expect(dailyText()).toContain(ANCHOR);
-    expect(dailyText()).toContain('block 4135');
-    expect(dailyText()).not.toContain(OLD_ANCHOR);
-    await clickButton('2');
-    expect(dailyText()).toContain(ANCHOR);
+    await mount();
+    await clickButton('Play daily challenge');
+    expect(boardLabel()).toBe(before);
+    expect(dailyText()).toContain(seed);
   });
-
-  it('keeps a date-only shared daily distinct from a stored anchored selection for that date', async () => {
+  it('keeps an active daily frozen across UTC midnight, while Play Daily opens the new day', async () => {
+    await mount();
+    await clickButton('Play daily challenge');
+    vi.setSystemTime(new Date('2026-10-31T00:00:00Z'));
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(boardLabel()).toContain(DATE);
+    expect(dailyText()).toContain(seed);
+    expect(dailyText()).toContain('Today in UTC: 2026-10-31');
+    await clickButton('Play daily challenge');
+    expect(boardLabel()).toContain('2026-10-31');
+  });
+  it('new Play Daily opens today from an older v2 shared challenge', async () => {
+    await mount(shareHash(dailyV2Seed('2026-10-29')));
+    expect(boardLabel()).toContain('2026-10-29');
+    await clickButton('Play daily challenge');
+    expect(boardLabel()).toContain(DATE);
+    expect(location.hash).toBe('');
+  });
+  it('keeps date-only legacy shared links distinct from saved anchored selections', async () => {
     localStorage.setItem(`sbr:daily:${DATE}`, JSON.stringify({ anchor: ANCHOR, block: '4135' }));
     response = live('IDLE');
     await mount(`#daily?d=${DATE}&v=n`);
     expect(dailyText()).toContain('cc4cbe1a');
     expect(dailyText()).toContain('UTC date 2026-10-30 only');
     expect(dailyText()).not.toContain(ANCHOR);
-  });
-
-  it('keeps the active daily disclosure on its original date across UTC midnight', async () => {
-    await mount();
-    await clickButton('Play daily challenge');
-    vi.setSystemTime(new Date('2026-10-31T00:00:00Z'));
-    await act(async () => { vi.advanceTimersByTime(1000); });
-    expect(boardLabel()).toContain(DATE);
-    expect(dailyText()).toContain(DATE);
-    expect(dailyText()).toContain('cc4cbe1a');
-    expect(savedDaily()).toEqual({ anchor: null, block: null });
   });
 });
 
@@ -272,5 +265,90 @@ describe('practice startup and live attempt freezing', () => {
     response = live('SPINNING');
     await clickButton('Check now');
     expect(routeLabel()).toBe('Wheel route');
+  });
+});
+
+
+describe('Settlement Rescue and route completion', () => {
+  const text = () => host.querySelector('#settlement-h')!.parentElement!.textContent!;
+  it('disables settlement without a valid source, leaving practice and Daily usable', async () => {
+    await mount();
+    expect(host.querySelector<HTMLButtonElement>('.modes button:last-child')!.disabled).toBe(true);
+    expect(text()).toContain('No valid settlement hash yet');
+    await clickButton('Play daily challenge');
+    expect(routeLabel()).toBe('Nap route');
+  });
+  it('freezes map and route through feed changes, Undo, Restart and practice settings', async () => {
+    response = live('IDLE');
+    await mount();
+    await clickButton('Play settlement rescue');
+    const before = boardLabel();
+    const expected = settlementSeed(ANCHOR);
+    expect(routeLabel()).toBe(expected.variant === 'nap' ? 'Nap route' : 'Wheel route');
+    expect(text()).toContain(ANCHOR);
+    const direction = solve(boardFor(expected), expected.variant)!.moves[0] as Dir;
+    const names = { U: 'Move up', D: 'Move down', L: 'Move left', R: 'Move right' };
+    await clickButton(names[direction]);
+    await clickButton('Undo');
+    response = live('SPINNING', OLD_ANCHOR);
+    await clickButton('Check now');
+    expect(boardLabel()).toBe(before);
+    expect(text()).toContain(ANCHOR);
+    await clickButton('Restart');
+    expect(boardLabel()).toBe(before);
+    await act(async () => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+    expect(boardLabel()).toBe(before);
+    await clickButton('Play settlement rescue');
+    expect(text()).toContain(OLD_ANCHOR);
+  });
+  it('loads a settlement result and watches it without an API or progress changes', async () => {
+    const a = settlementSeed(ANCHOR);
+    const moves = solve(boardFor(a), a.variant)!.moves;
+    await mount(shareHash(a, moves));
+    expect(replayText()).toContain('Replay verified');
+    const before = boardLabel();
+    await clickButton('Watch verified replay');
+    for (let i = 0; i < moves.length; i++) await act(async () => { vi.advanceTimersByTime(240); });
+    expect(boardLabel()).toContain(`Moves: ${moves.length}/`);
+    expect(localStorage.getItem('sbr:progress')).toBeNull();
+    await clickButton('Return to your attempt');
+    expect(boardLabel()).toBe(before);
+  });
+  it('retains an honestly labelled last-known settlement across reload and outage', async () => {
+    response = live('IDLE');
+    await mount();
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    response = null;
+    await mount();
+    await clickButton('Play settlement rescue');
+    expect(text()).toContain(ANCHOR);
+    expect(text()).toContain('Last known settlement');
+  });
+  it('records completion per route and preserves the aggregate legacy score', async () => {
+    await mount();
+    const moves = 'RRDDDDDLLUURRRRUUUDDDDR';
+    for (const d of moves) await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: ({ U:'ArrowUp', D:'ArrowDown', L:'ArrowLeft', R:'ArrowRight' })[d as Dir] })));
+    expect(host.querySelector('.result h3')!.textContent).toBe('Burrow rescued');
+    const p = JSON.parse(localStorage.getItem('sbr:progress')!);
+    expect(p['L1:nap']).toEqual({ stars: 3, moves: 23 });
+    expect(p.L1).toEqual(p['L1:nap']);
+    expect(p['L1:wheel']).toBeUndefined();
+    expect(host.querySelector('.route-counts')!.textContent).toContain('Nap route: 1/3 rescued');
+    expect(verifyReplay({ kind:'level', level:0, sym:0, variant:'nap' }, moves).ok).toBe(true);
+  });
+  it('shows the all-pups ending once all original levels have a rescue', async () => {
+    localStorage.setItem('sbr:progress', JSON.stringify(Object.fromEntries(Array.from({ length:12 }, (_, i) => [`L${i+1}`, { stars:1, moves:40 }]))));
+    await mount();
+    expect(host.querySelector('.ending')!.textContent).toContain('All 36 pups are home');
+    expect(host.querySelector('.ending')!.textContent).toContain('0/24');
+  });
+  it('shows an explicit error for unsupported links and clears an old verdict', async () => {
+    await mount(WIN_HASH);
+    await navigate('#daily?g=99&d=2026-10-30');
+    expect(host.querySelector('[role=alert]')!.textContent).toContain('unsupported version');
+    expect(replayText()).toBeNull();
+    await clickButton('Play daily challenge');
+    expect(host.querySelector('[role=alert]')).toBeNull();
   });
 });

@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dir, Variant, initialState, starsFor, step, xy } from './game/engine';
+import { Dir, GameState, Variant, deadCorners, initialState, starsFor, step, xy } from './game/engine';
 import { History } from './game/history';
-import { LEVELS, budgetFor } from './game/levels';
+import { CHAPTERS, LEVELS, budgetFor } from './game/levels';
 import { LiveSnapshot, fetchStatus, isStale, nextDelay, usableLive } from './game/live';
-import { Attempt, Verdict, boardFor, dailySeed, parseHash, shareHash, utcDate, verifyReplay } from './game/challenge';
+import { Attempt, Verdict, boardFor, dailySeed, dailyV2Seed, definitionFor, parseHash, progressKey, settlementSeed, shareHash, utcDate, verifyReplay } from './game/challenge';
 import { Lang, STRINGS, fmt } from './i18n';
 import { play as sfx, Sfx } from './sound';
-import { loadDailyAnchor, loadPrefs, loadProgress, saveBest, saveDailyAnchor, savePrefs } from './storage';
+import { loadDailyAnchor, loadPrefs, loadProgress, loadSettlementAnchor, saveBest, savePrefs, saveSettlementAnchor } from './storage';
 import { BoardView } from './components/Board';
 import { Wheel } from './components/Wheel';
 import { Pup } from './components/Art';
 
-type Source = 'live' | 'practice' | 'shared';
+type Source = 'live' | 'practice' | 'shared' | 'daily' | 'settlement';
 interface Run {
   attempt: Attempt;
   source: Source;
@@ -24,7 +24,7 @@ interface Run {
   hist: History;
 }
 
-const keyFor = (a: Attempt) => (a.kind === 'daily' ? `D${a.date}` : `L${LEVELS[a.level].id}`);
+const keyFor = progressKey;
 
 export default function App() {
   const prefs0 = useMemo(loadPrefs, []);
@@ -44,11 +44,17 @@ export default function App() {
   const pollTimer = useRef<number>();
 
   const [progress, setProgress] = useState(loadProgress);
+  const [cachedAnchor, setCachedAnchor] = useState(loadSettlementAnchor);
+  const [hint, setHint] = useState<string | null>(null);
+  const [hintBusy, setHintBusy] = useState(false);
+  const hintWorker = useRef<Worker | null>(null);
+  const [watchIndex, setWatchIndex] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<{ v: Verdict; hash: string } | null>(() => {
     const parsed = parseHash(location.hash);
     return parsed?.moves ? { v: verifyReplay(parsed.attempt, parsed.moves), hash: location.hash } : null;
   });
   const [announce, setAnnounce] = useState('');
+  const [invalidLink, setInvalidLink] = useState(() => /^#(daily|settlement|level)\?/.test(location.hash) && !parseHash(location.hash));
   const [copyMsg, setCopyMsg] = useState('');
   const [, force] = useState(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -69,6 +75,10 @@ export default function App() {
       const snap = await fetchStatus();
       liveRef.current = snap;
       setLive(snap);
+      if (snap.anchorTx) {
+        saveSettlementAnchor(snap.anchorTx, snap.fetchedAt);
+        setCachedAnchor({ anchor: snap.anchorTx, fetchedAt: snap.fetchedAt });
+      }
       setLiveErr(null);
       failures.current = 0;
     } catch (e) {
@@ -97,7 +107,10 @@ export default function App() {
       let source: Source;
       let variant: Variant;
       let auto = false;
-      if (shared && attempt.variant) {
+      if ((attempt.kind === 'daily' && attempt.version === 2) || attempt.kind === 'settlement') {
+        source = shared ? 'shared' : attempt.kind;
+        variant = attempt.variant!;
+      } else if (shared && attempt.variant) {
         source = 'shared';
         variant = attempt.variant;
       } else if (!practicePref && usableLive(snap, Date.now())) {
@@ -130,48 +143,72 @@ export default function App() {
   useEffect(() => {
     const onHashChange = () => {
       const parsed = parseHash(location.hash);
-      if (!parsed) return;
+      if (!parsed) {
+        if (/^#(daily|settlement|level)\?/.test(location.hash)) { setInvalidLink(true); setVerdict(null); setWatchIndex(null); }
+        return;
+      }
+      setInvalidLink(false);
       setRun(makeRun(parsed.attempt, true));
       setVerdict(parsed.moves ? { v: verifyReplay(parsed.attempt, parsed.moves), hash: location.hash } : null);
       setCopyMsg('');
       setAnnounce('');
+      setWatchIndex(null);
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [makeRun]);
 
+  const focusGame = () => {
+    const game = document.getElementById('play');
+    game?.focus({ preventScroll: true });
+    game?.scrollIntoView?.({ block: 'start' });
+  };
   const startLevel = (level: number) => {
+    focusGame();
     setRun(makeRun({ kind: 'level', level, sym: 0 }));
+    setWatchIndex(null);
     setVerdict(null);
+    setInvalidLink(false);
     history.replaceState(null, '', location.pathname + location.search);
     setCopyMsg('');
   };
 
+  const today = dailyV2Seed(utcDate(now));
   const daily = useMemo(() => {
-    if (run.attempt.kind === 'daily') {
+    if (run.attempt.kind === 'daily' && run.attempt.version !== 2) {
       const date = run.attempt.date!;
       const anchor = run.attempt.anchor ?? null;
       const stored = loadDailyAnchor(date);
       const block = stored?.anchor === anchor ? stored.block : live?.anchorTx === anchor ? live.anchorBlock : null;
-      return { ...dailySeed(date, anchor), block };
+      return { ...dailySeed(date, anchor), version: 1, block };
     }
-    const date = utcDate(now);
-    const stored = loadDailyAnchor(date);
-    if (stored) return { ...dailySeed(date, stored.anchor), block: stored.block };
-    return { ...dailySeed(date, live?.anchorTx ?? null), block: live?.anchorBlock ?? null };
+    const date = run.attempt.kind === 'daily' ? run.attempt.date! : utcDate(now);
+    return { ...dailyV2Seed(date), anchor: null, block: null };
   }, [now, live, run.attempt]);
 
-  const startDaily = () => {
-    const date = daily.date;
-    if (!loadDailyAnchor(date)) saveDailyAnchor(date, { anchor: daily.anchor, block: daily.block });
-    setRun(makeRun({ kind: 'daily', level: daily.level, sym: daily.sym, date, anchor: daily.anchor }));
+  const clearLink = () => {
     setVerdict(null);
+    setInvalidLink(false);
     history.replaceState(null, '', location.pathname + location.search);
     setCopyMsg('');
+    setWatchIndex(null);
+  };
+  const startDaily = () => {
+    focusGame();
+    setRun(makeRun(dailyV2Seed(utcDate(Date.now()))));
+    clearLink();
+  };
+  const settlementAnchor = live?.anchorTx ?? cachedAnchor?.anchor ?? null;
+  const startSettlement = () => {
+    if (!settlementAnchor) return;
+    focusGame();
+    setRun(makeRun(settlementSeed(settlementAnchor)));
+    clearLink();
   };
 
   const restart = () => {
-    if (run.source === 'shared') {
+    setWatchIndex(null);
+    if (run.source === 'shared' || run.attempt.kind !== 'level') {
       setRun({ ...run, touched: false, hist: new History(initialState(boardFor(run.attempt))) });
     } else {
       const { variant: _v, ...rest } = run.attempt;
@@ -196,23 +233,60 @@ export default function App() {
       return;
     }
     setRun((r) => {
-      if (r.source === 'shared') return r;
+      if (r.source === 'shared' || r.attempt.kind !== 'level') return r;
       const { variant: _v, ...rest } = r.attempt;
       return makeRun(rest);
     });
   }, [practicePref, route, makeRun]);
 
   const board = useMemo(() => boardFor(run.attempt), [run.attempt]);
-  const lvl = LEVELS[run.attempt.level];
+  const lvl = definitionFor(run.attempt);
   const budget = budgetFor(lvl, run.attempt.variant);
   const par = lvl.par[run.attempt.variant];
-  const s = run.hist.current;
+  const actual = run.hist.current;
+  const replayFrames = useMemo(() => {
+    if (!verdict?.v.ok) return [];
+    const parsed = parseHash(verdict.hash);
+    if (!parsed?.moves) return [];
+    const frames = [initialState(board)];
+    for (const d of parsed.moves) frames.push(step(board, frames[frames.length - 1], d as Dir, { variant: run.attempt.variant, budget })!);
+    return frames;
+  }, [verdict, board, run.attempt.variant, budget]);
+  const s: GameState = watchIndex !== null && replayFrames[watchIndex] ? replayFrames[watchIndex] : actual;
+  const stuck = deadCorners(board, run.attempt.variant).some((i) => s.crates.includes(i));
+
+  useEffect(() => {
+    hintWorker.current?.terminate();
+    setHint(null);
+    setHintBusy(false);
+    return () => hintWorker.current?.terminate();
+  }, [run.attempt, actual, lang]);
+  useEffect(() => {
+    if (watchIndex === null || watchIndex >= replayFrames.length - 1) return;
+    const timer = window.setTimeout(() => setWatchIndex(watchIndex + 1), 240);
+    return () => window.clearTimeout(timer);
+  }, [watchIndex, replayFrames.length]);
+  const requestHint = () => {
+    if (hintBusy || actual.status !== 'play') return;
+    setHintBusy(true);
+    try {
+      const worker = new Worker(new URL('./game/hint.worker.ts', import.meta.url), { type: 'module' });
+      hintWorker.current = worker;
+      worker.onmessage = (event: MessageEvent<Dir | null>) => {
+        setHint(event.data ? fmt(t.hintMove, { dir: t.dirs[event.data] }) : t.noHint);
+        setHintBusy(false);
+        worker.terminate();
+      };
+      worker.onerror = () => { setHint(t.hintError); setHintBusy(false); worker.terminate(); };
+      worker.postMessage({ board, state: actual, variant: run.attempt.variant, budget });
+    } catch { setHint(t.hintError); setHintBusy(false); }
+  };
   const pupsLeft = board.pups.filter((_, k) => s.pups & (1 << k)).length;
 
   const move = useCallback(
     (d: Dir) => {
       const cur = run.hist.current;
-      if (cur.status !== 'play') return;
+      if (cur.status !== 'play' || watchIndex !== null) return;
       const n = step(board, cur, d, { variant: run.attempt.variant, budget });
       if (!n) {
         beep('blocked');
@@ -225,7 +299,11 @@ export default function App() {
       if (n.status === 'won') {
         beep('win');
         setAnnounce(`${t.won}. ${fmt(t.wonBody, { moves: n.moves })}`);
-        setProgress(saveBest(keyFor(run.attempt), { stars: starsFor(n.moves, par, budget), moves: n.moves }));
+        const best = { stars: starsFor(n.moves, par, budget), moves: n.moves };
+        saveBest(keyFor(run.attempt), best);
+        // Keep the original aggregate score and level IDs for existing players.
+        if (run.attempt.kind === 'level') saveBest(`L${lvl.id}`, best);
+        setProgress(loadProgress());
       } else if (n.status === 'caught') {
         beep('caught');
         setAnnounce(`${t.caught}. ${t.caughtBody}`);
@@ -241,21 +319,21 @@ export default function App() {
         setAnnounce(fmt(t.statusMoved, { dir: t.dirs[d], moves: n.moves, budget }));
       }
     },
-    [run, board, budget, par, beep, t],
+    [run, board, budget, par, beep, t, watchIndex, lvl.id],
   );
 
   const undo = useCallback(() => {
-    if (!run.hist.canUndo) return;
+    if (!run.hist.canUndo || watchIndex !== null) return;
     run.hist.undo();
     force((x) => x + 1);
     setAnnounce(fmt(t.statusMoved, { dir: '', moves: run.hist.current.moves, budget }).replace(/^[^.。]*[.。]\s*/, ''));
-  }, [run, t, budget]);
+  }, [run, t, budget, watchIndex]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const el = e.target as HTMLElement;
-      if (el.closest('input, select, textarea, dialog[open]')) return;
+      const el = e.target;
+      if (el instanceof Element && el.closest('input, select, textarea, dialog[open]')) return;
       const map: Record<string, Dir> = {
         ArrowUp: 'U', ArrowDown: 'D', ArrowLeft: 'L', ArrowRight: 'R',
         w: 'U', s: 'D', a: 'L', d: 'R', W: 'U', S: 'D', A: 'L', D: 'R',
@@ -275,8 +353,8 @@ export default function App() {
 
   const shareUrl = useMemo(() => {
     const base = location.href.split('#')[0];
-    return base + shareHash(run.attempt, s.status === 'won' ? run.hist.moves : undefined);
-  }, [run, s.status]);
+    return base + shareHash(run.attempt, actual.status === 'won' ? run.hist.moves : undefined);
+  }, [run, actual.status]);
 
   const copy = async () => {
     try {
@@ -294,15 +372,18 @@ export default function App() {
   const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: 'numeric', month: 'short', timeZoneName: 'short' }) : '–');
   const practiceForced = !usableLive(live, now);
 
-  const title = run.attempt.kind === 'daily' ? `${t.daily} · ${run.attempt.date}` : `${t.level} ${lvl.id} · ${lvl.name[lang]}`;
+  const title = run.attempt.kind === 'settlement' ? `${t.settlementTitle} · ${lvl.name[lang]}` : run.attempt.kind === 'daily' ? `${t.daily} · ${run.attempt.date}` : `${t.level} ${lvl.id} · ${lvl.name[lang]}`;
   const best = progress[keyFor(run.attempt)];
   const finalStars = s.status === 'won' ? starsFor(s.moves, par, budget) : 0;
   const [hx, hy] = xy(s.h);
-  const boardLabel = `${title}. ${t.pups}: ${pupsLeft}. ${t.moves}: ${s.moves}/${budget}. Hamster ${hx + 1},${hy + 1}.`;
+  const boardLabel = `${title}. ${t.pups}: ${pupsLeft}. ${t.moves}: ${s.moves}/${budget}. ${fmt(t.hamsterAt, { x: hx + 1, y: hy + 1 })}`;
+  const completed = LEVELS.filter((L) => progress[`L${L.id}`] || progress[`L${L.id}:nap`] || progress[`L${L.id}:wheel`]).length;
+  const routeCompleted = LEVELS.reduce((n, L) => n + Number(!!progress[`L${L.id}:nap`]) + Number(!!progress[`L${L.id}:wheel`]), 0);
+  const activeAnchor = run.attempt.kind === 'settlement' ? run.attempt.anchor : settlementAnchor;
 
   return (
     <>
-      <a className="skip" href="#play">Skip to game</a>
+      <a className="skip" href="#play">{t.skipGame}</a>
       <header className="top">
         <div className="brand">
           <img src="./favicon.svg" alt="" width="36" height="36" />
@@ -327,8 +408,16 @@ export default function App() {
 
       <main className="layout">
         <section className="play" id="play" aria-labelledby="level-title" tabIndex={-1}>
+          {invalidLink && <p className="warning" role="alert">{t.invalidLink}</p>}
+          <nav className="modes" aria-label={t.playChallenge}>
+            <button type="button" aria-pressed={run.attempt.kind === 'level'} className={`btn ${run.attempt.kind === 'level' ? 'selected' : ''}`} onClick={() => startLevel(run.attempt.kind === 'level' ? run.attempt.level : 0)}>{t.levels}</button>
+            <button type="button" aria-pressed={run.attempt.kind === 'daily'} className={`btn ${run.attempt.kind === 'daily' ? 'selected' : ''}`} onClick={startDaily}>{t.dailyTitle}</button>
+            <button type="button" aria-pressed={run.attempt.kind === 'settlement'} className={`btn ${run.attempt.kind === 'settlement' ? 'selected' : ''}`} disabled={!settlementAnchor} onClick={startSettlement}>{t.settlementTitle}</button>
+          </nav>
           <div className="hud">
             <h2 id="level-title">{title}</h2>
+            {run.attempt.kind === 'settlement' && <details className="source-details"><summary>{t.settlementSource}</summary><code className="hash">{run.attempt.anchor}</code></details>}
+            <p className="small">{t.tagline}</p>
             <div className="hud-row">
               <span className={`chip ${run.attempt.variant}`}>{run.attempt.variant === 'wheel' ? t.routeWheel : t.routeNap}</span>
               <span className="stat">
@@ -343,13 +432,12 @@ export default function App() {
               </span>
             </div>
           </div>
-          {lvl.tip && run.attempt.kind === 'level' && <p className="tip">{lvl.tip[lang]}</p>}
 
           <div className="board-wrap">
             <BoardView board={board} state={s} variant={run.attempt.variant} label={boardLabel} />
-            {s.status !== 'play' && (
+            {s.status !== 'play' && watchIndex === null && (
               <div className={`result ${s.status}`}>
-                <h3>{s.status === 'won' ? t.won : s.status === 'caught' ? t.caught : t.out}</h3>
+                <h3>{s.status === 'won' ? completed === LEVELS.length && run.attempt.kind === 'level' ? t.allRescued : t.won : s.status === 'caught' ? t.caught : t.out}</h3>
                 <p>
                   {s.status === 'won' ? fmt(t.wonBody, { moves: s.moves }) : s.status === 'caught' ? t.caughtBody : t.outBody}
                 </p>
@@ -382,7 +470,7 @@ export default function App() {
                 </div>
                 {copyMsg && (
                   <p className="copy-msg">
-                    {copyMsg} <input readOnly value={shareUrl} aria-label="Result link" onFocus={(e) => e.currentTarget.select()} />
+                    {copyMsg} <input readOnly value={shareUrl} aria-label={t.challengeLink} onFocus={(e) => e.currentTarget.select()} />
                   </p>
                 )}
               </div>
@@ -390,22 +478,22 @@ export default function App() {
           </div>
 
           <div className="controls">
-            <div className="pad" role="group" aria-label="Move">
-              <button type="button" className="btn pad-btn up" onClick={() => move('U')} aria-label={t.up}>
+            <div className="pad" role="group" aria-label={t.moveGroup}>
+              <button type="button" className="btn pad-btn up" disabled={watchIndex !== null || s.status !== 'play'} onClick={() => move('U')} aria-label={t.up}>
                 <Arrow r={0} />
               </button>
-              <button type="button" className="btn pad-btn left" onClick={() => move('L')} aria-label={t.left}>
+              <button type="button" className="btn pad-btn left" disabled={watchIndex !== null || s.status !== 'play'} onClick={() => move('L')} aria-label={t.left}>
                 <Arrow r={270} />
               </button>
-              <button type="button" className="btn pad-btn down" onClick={() => move('D')} aria-label={t.down}>
+              <button type="button" className="btn pad-btn down" disabled={watchIndex !== null || s.status !== 'play'} onClick={() => move('D')} aria-label={t.down}>
                 <Arrow r={180} />
               </button>
-              <button type="button" className="btn pad-btn right" onClick={() => move('R')} aria-label={t.right}>
+              <button type="button" className="btn pad-btn right" disabled={watchIndex !== null || s.status !== 'play'} onClick={() => move('R')} aria-label={t.right}>
                 <Arrow r={90} />
               </button>
             </div>
             <div className="side-actions">
-              <button type="button" className="btn" onClick={undo} disabled={!run.hist.canUndo}>
+              <button type="button" className="btn" onClick={undo} disabled={!run.hist.canUndo || watchIndex !== null}>
                 {t.undo}
               </button>
               <button type="button" className="btn" onClick={restart}>
@@ -413,7 +501,22 @@ export default function App() {
               </button>
             </div>
           </div>
-          <p className="keys">{t.keysHint}</p>
+          <p className="keys">{watchIndex !== null ? fmt(t.replayFrame, { moves: s.moves, total: replayFrames.length - 1 }) : t.keysHint}</p>
+          {watchIndex !== null && <button type="button" className="btn" onClick={() => setWatchIndex(null)}>{t.stopReplay}</button>}
+          {stuck && <p className="warning" role="status">{t.deadWarning}</p>}
+          <div className="play-tools">
+            <button type="button" className="btn" onClick={requestHint} disabled={hintBusy || s.status !== 'play' || watchIndex !== null}>{hintBusy ? t.searchingHint : t.nextMove}</button>
+            <button type="button" className="btn" onClick={copy}>{t.shareChallenge}</button>
+          </div>
+          <p className="hint-message small" role="status">{hint}</p>
+          {copyMsg && s.status === 'play' && <label className="copy-msg">{copyMsg}<input readOnly value={shareUrl} aria-label={t.challengeLink} onFocus={(e) => e.currentTarget.select()} /></label>}
+          <details className="strategy">
+            <summary>{t.strategy}</summary>
+            <p>{lvl.tip?.[lang] ?? t.strategyBody}</p>
+            {board.crates.length > 0 && <p>{t.cornerNote}</p>}
+            {board.beetles.length > 0 && <p>{t.arrowsNote}</p>}
+          </details>
+          {completed === LEVELS.length && <section className="ending" aria-labelledby="ending-h"><h2 id="ending-h">{t.allRescued}</h2><p>{t.allRescuedBody}</p><p className="small">{fmt(t.mastery, { done: routeCompleted })}</p></section>}
           <p className="sr-only" role="status" aria-live="polite">
             {announce}
           </p>
@@ -475,7 +578,7 @@ export default function App() {
           </section>
 
           <section className="card rules" aria-labelledby="rules-h">
-            <h2 id="rules-h">{run.source === 'live' ? t.frozenLive : run.source === 'shared' ? t.frozenShared : t.frozenPractice}</h2>
+            <h2 id="rules-h">{run.source === 'live' ? t.frozenLive : run.source === 'shared' ? t.frozenShared : run.source === 'daily' ? t.frozenDaily : run.source === 'settlement' ? t.frozenSettlement : t.frozenPractice}</h2>
             <p>{run.attempt.variant === 'wheel' ? t.wheelRule : t.napRule}</p>
             {run.source === 'live' && (
               <p className="small">
@@ -494,45 +597,50 @@ export default function App() {
               <p className={verdict.v.ok ? '' : 'warn-text'}>
                 {verdict.v.ok ? fmt(t.replayOk, { moves: verdict.v.moves, stars: verdict.v.stars }) : t.replayBad}
               </p>
+              {verdict.v.ok && <><button type="button" className="btn" onClick={() => setWatchIndex(0)}>{t.watchReplay}</button><p className="small">{t.replayWatching}</p></>}
               <p className="small">{t.leaderboardNote}</p>
             </section>
           )}
 
+          <section className="card" aria-labelledby="settlement-h">
+            <h2 id="settlement-h">{t.settlementTitle}</h2>
+            <p className="small">{t.settlementBody}</p>
+            {activeAnchor ? <><p className="small">{t.settlementSource}</p><code className="hash">{activeAnchor}</code></> : <p className="small">{t.settlementUnavailable}</p>}
+            {run.attempt.kind === 'settlement' && run.source === 'shared' ? <p className="small">{t.settlementShared}</p> : activeAnchor && (liveErr || !live || stale) && <p className="warn-text">{t.settlementCached}</p>}
+            {run.attempt.kind === 'settlement' && settlementAnchor && activeAnchor !== settlementAnchor && <p className="small">{t.newSettlementReady}</p>}
+            <button type="button" className="btn" onClick={startSettlement} disabled={!settlementAnchor}>{t.playSettlement}</button>
+          </section>
+
           <section className="card" aria-labelledby="daily-h">
             <h2 id="daily-h">{t.dailyTitle}</h2>
-            <p className="small">
-              {daily.anchor
-                ? fmt(t.dailySourceAnchor, { date: daily.date, tx: daily.anchor, block: daily.block ?? '–' })
-                : fmt(t.dailySourceDate, { date: daily.date })}
-            </p>
-            <p className="small">
-              {t.dailySeed} {daily.seed.toString(16).padStart(8, '0')} · {t.level} {LEVELS[daily.level].id}
-              {progress[`D${daily.date}`] ? ` · ${t.best} ${progress[`D${daily.date}`].moves} (${'★'.repeat(progress[`D${daily.date}`].stars)})` : ''}
-            </p>
-            <button type="button" className="btn primary" onClick={startDaily}>
-              {t.playDaily}
-            </button>
+            <p className="small">{daily.version === 2 ? fmt(t.dailyV2Source, { date: daily.date! }) : daily.anchor ? fmt(t.dailySourceAnchor, { date: daily.date!, tx: daily.anchor, block: daily.block ?? '–' }) : fmt(t.dailySourceDate, { date: daily.date! })}</p>
+            {daily.version !== 2 && <p className="small">{t.legacyDaily}</p>}
+            <p className="small">{t.dailySeed} {daily.seed.toString(16).padStart(8, '0')} · {definitionFor({ ...run.attempt, kind: 'daily', level: daily.level, version: daily.version }).name[lang]}</p>
+            <p className="small">{fmt(t.todayDate, { date: today.date! })}</p>
+            <button type="button" className="btn" onClick={startDaily}>{t.playDaily}</button>
           </section>
 
           <section className="card" aria-labelledby="levels-h">
-            <h2 id="levels-h">{t.levels}</h2>
-            <ol className="levels">
-              {LEVELS.map((L, i) => {
-                const b = progress[`L${L.id}`];
-                const current = run.attempt.kind === 'level' && run.attempt.level === i;
-                return (
-                  <li key={L.id}>
-                    <button type="button" className={`lvl ${current ? 'current' : ''}`} aria-current={current ? 'true' : undefined} onClick={() => startLevel(i)} aria-label={`${t.level} ${L.id}: ${L.name[lang]}${b ? `, ${fmt(t.stars, { n: b.stars })}` : ''}`}>
+            <h2 id="levels-h">{t.chapters}</h2>
+            <ol className="chapters">{CHAPTERS.map((chapter, chapterIndex) => <li className="chapter" key={chapterIndex}>
+              <h3>{chapterIndex + 1}. {chapter.name[lang]}</h3>
+              <p className="small route-counts">{(['nap', 'wheel'] as const).map((v) => <span key={v}>{fmt(t.routeProgress, { route: v === 'nap' ? t.routeNap : t.routeWheel, done: chapter.levels.filter((i) => progress[`L${LEVELS[i].id}:${v}`]).length })}</span>)}</p>
+              <ol className="levels" start={chapter.levels[0] + 1}>
+                {chapter.levels.map((i) => {
+                  const L = LEVELS[i];
+                  const b = progress[`L${L.id}`];
+                  const current = run.attempt.kind === 'level' && run.attempt.level === i;
+                  const completedRoutes = (['nap', 'wheel'] as const).filter((v) => progress[`L${L.id}:${v}`]);
+                  return <li key={L.id}>
+                    <button type="button" className={`lvl ${current ? 'current' : ''}`} aria-current={current ? 'true' : undefined} onClick={() => startLevel(i)} aria-label={`${t.level} ${L.id}: ${L.name[lang]}${b ? `, ${fmt(t.stars, { n: b.stars })}` : ''}. ${completedRoutes.map((v) => v === 'nap' ? t.routeNap : t.routeWheel).join(', ')}`}>
                       <span className="lvl-n">{L.id}</span>
-                      <span className="lvl-stars" aria-hidden="true">
-                        {'★'.repeat(b?.stars ?? 0)}
-                        <span className="dim">{'★'.repeat(3 - (b?.stars ?? 0))}</span>
-                      </span>
+                      <span className="lvl-stars" aria-hidden="true">{'★'.repeat(b?.stars ?? 0)}<span className="dim">{'★'.repeat(3 - (b?.stars ?? 0))}</span></span>
+                      <span className="route-marks" aria-hidden="true">{completedRoutes.length ? completedRoutes.map((v) => v === 'nap' ? lang === 'zh' ? '午' : 'N' : lang === 'zh' ? '转' : 'W').join(' · ') : '–'}</span>
                     </button>
-                  </li>
-                );
-              })}
-            </ol>
+                  </li>;
+                })}
+              </ol>
+            </li>)}</ol>
             <p className="small">{t.leaderboardNote}</p>
           </section>
         </aside>

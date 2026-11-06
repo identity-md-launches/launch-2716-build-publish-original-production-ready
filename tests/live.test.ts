@@ -32,6 +32,15 @@ describe('live status parsing (real captured response)', () => {
     expect(isStale(s, Date.parse(fixture.measurement.observedAt) + 121000)).toBe(true);
     expect(usableLive(s, Date.parse(fixture.measurement.observedAt) + 121000)).toBe(false);
   });
+  it('settlement parsing tolerates missing sensor data but uses only a valid builder anchor', () => {
+    const hash = fixture.builder.anchor.transactionHash;
+    const s = parseStatus({ builder:{ anchor:{transactionHash:hash} } }, Date.now())!;
+    expect(s.anchorTx).toBe(hash);
+    expect(s.coreStatus).toBeNull();
+    expect(usableLive(s,Date.now())).toBe(false);
+    expect(parseStatus({ measurement:{}, builder:{anchor:{transactionHash:'0x'+'0'.repeat(64)}} },0)!.anchorTx).toBeNull();
+    expect(parseStatus({ measurement:{}, builder:{anchor:{transactionHash:'invalid'}}, settlementQueue:{latestSubmission:{transactionHash:hash}} },0)!.anchorTx).toBeNull();
+  });
   it('backs off on failures', () => {
     expect(nextDelay(0)).toBe(15000);
     expect(nextDelay(1)).toBe(30000);
@@ -86,6 +95,6 @@ describe('daily seed, share URL and replay verification', () => {
   it('rejects malformed hashes', () => {
     expect(parseHash('#level?l=99')).toBeNull();
     expect(parseHash('#daily?d=yesterday')).toBeNull();
-    expect(parseHash('#level?l=1&m=XYZ')!.moves).toBeNull();
+    expect(verifyReplay(parseHash('#level?l=1&m=XYZ')!.attempt, parseHash('#level?l=1&m=XYZ')!.moves!).ok).toBe(false);
   });
 });

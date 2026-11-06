@@ -7,8 +7,13 @@ export interface Solution {
 
 /** Breadth-first search: returns a shortest winning move string, or null. */
 export function solve(b: Board, variant: Variant, limit = 200, maxStates = 400000): Solution | null {
+  return solveFrom(b, initialState(b), variant, limit, maxStates);
+}
+
+/** Search from an in-progress state, respecting the total frozen move budget. */
+export function solveFrom(b: Board, start: GameState, variant: Variant, limit: number, maxStates = 60000): Solution | null {
+  if (start.status !== 'play') return null;
   const rules = { variant, budget: limit };
-  const start = initialState(b);
   const seen = new Map<string, string>();
   seen.set(stateKey(start), '');
   let frontier: { s: GameState; path: string }[] = [{ s: start, path: '' }];

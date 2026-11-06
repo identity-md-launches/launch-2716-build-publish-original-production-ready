@@ -25,23 +25,25 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 
 export function parseStatus(body: unknown, fetchedAt: number): LiveSnapshot | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
-  const m = b.measurement && typeof b.measurement === 'object' ? (b.measurement as Record<string, unknown>) : null;
-  if (!m) return null;
+  const measurement = b.measurement && typeof b.measurement === 'object' ? (b.measurement as Record<string, unknown>) : null;
+  const m = measurement ?? {};
   const raw = str(m.coreStatus);
   const coreStatus = raw === 'SPINNING' || raw === 'IDLE' ? raw : null;
   const rpm = typeof m.rpmMilli === 'number' && Number.isFinite(m.rpmMilli) ? m.rpmMilli / 1000 : null;
   const builder = b.builder && typeof b.builder === 'object' ? (b.builder as Record<string, unknown>) : null;
   const anchor = builder?.anchor && typeof builder.anchor === 'object' ? (builder.anchor as Record<string, unknown>) : null;
   const tx = str(anchor?.transactionHash);
+  const anchorTx = tx && /^0x[0-9a-fA-F]{64}$/.test(tx) && !/^0x0{64}$/.test(tx) ? tx.toLowerCase() : null;
+  if (!measurement && !anchorTx) return null;
   return {
     coreStatus,
     rawStatus: raw,
     rpm,
     observedAt: str(m.observedAt),
     fetchedAt,
-    staleAfterSeconds: typeof m.staleAfterSeconds === 'number' ? m.staleAfterSeconds : 120,
+    staleAfterSeconds: typeof m.staleAfterSeconds === 'number' && Number.isFinite(m.staleAfterSeconds) && m.staleAfterSeconds > 0 ? m.staleAfterSeconds : 120,
     freshness: str(m.freshness),
-    anchorTx: tx && /^0x[0-9a-fA-F]{64}$/.test(tx) ? tx.toLowerCase() : null,
+    anchorTx,
     anchorBlock: str(anchor?.blockHeight),
   };
 }

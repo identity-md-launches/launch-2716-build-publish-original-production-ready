@@ -33,3 +33,18 @@ export const LEVELS: LevelDef[] = [
   { id: 11, name: { en: 'Crowded hall', zh: '拥挤大厅' }, rows: ['P.#.P.', '.HW.#.', '.C#.CB', '.O#.O.', '..Z.#.', 'P.#.GN'], par: { wheel: 24, nap: 24 } },
   { id: 12, name: { en: 'Home stretch', zh: '回家之路' }, rows: ['H.#PGN', '.C#.##', '.OW..b', '..#...', 'P.Z.C.', '..#.OP'], par: { wheel: 37, nap: 25 } },
 ];
+
+/** Separate, versioned challenge pool. Never reorder or edit released maps. */
+export const DAILY_MAPS: LevelDef[] = [
+  { id: 1, name: { en: 'Clover crossing', zh: '三叶草小径' }, rows: ['H.P#P.', '...#..', '.C.W..', '.O.#..', 'P..Z.N', '...#..'], par: { nap: 21, wheel: 21 } },
+  { id: 2, name: { en: 'Acorn pantry', zh: '橡果粮仓' }, rows: ['H..#PN', '.C.#G.', '..OW..', 'P..#..', '.B.Z..', 'P..#..'], par: { nap: 19, wheel: 21 } },
+  { id: 3, name: { en: 'Fern lookout', zh: '蕨叶瞭望台' }, rows: ['P..#PN', '.H.#..', '...W.b', '.C.#..', '.O.Z..', 'P..#..'], par: { nap: 17, wheel: 17 } },
+  { id: 4, name: { en: 'Willow hideaway', zh: '柳树藏身处' }, rows: ['H.P#GN', '.C.#.P', '..OW..', '...#b.', '...Z..', 'P..#..'], par: { nap: 19, wheel: 21 } },
+];
+
+export const CHAPTERS = [
+  { name: { en: 'Mossy entrance', zh: '苔藓入口' }, levels: [0, 1, 2] },
+  { name: { en: 'Seed stores', zh: '种子仓库' }, levels: [3, 4, 5] },
+  { name: { en: 'Lantern tunnels', zh: '灯笼隧道' }, levels: [6, 7, 8] },
+  { name: { en: 'Heart of the burrow', zh: '洞穴之心' }, levels: [9, 10, 11] },
+];

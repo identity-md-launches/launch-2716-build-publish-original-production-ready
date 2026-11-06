@@ -2,3 +2,6 @@ node_modules/
 test/scratch/
 *.tgz
 .DS_Store
+
+# Path budget: /.cache/ is tool runtime cache; 0 bytes in the delivery.
+/.cache/

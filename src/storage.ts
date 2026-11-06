@@ -33,3 +33,10 @@ export const loadPrefs = () => read<{ lang?: 'en' | 'zh'; sound?: boolean; pract
 export const savePrefs = (p: ReturnType<typeof loadPrefs>) => write('sbr:prefs', p);
 export const loadDailyAnchor = (date: string) => read<{ anchor: string | null; block: string | null } | null>(`sbr:daily:${date}`, null);
 export const saveDailyAnchor = (date: string, v: { anchor: string | null; block: string | null }) => write(`sbr:daily:${date}`, v);
+
+/** Only written after receiving a real, validated builder anchor. Never a seeded fallback. */
+export const loadSettlementAnchor = () => {
+  const v = read<{ anchor: string; fetchedAt: number } | null>('sbr:settlement', null);
+  return v && typeof v.anchor === 'string' && /^0x[0-9a-f]{64}$/.test(v.anchor) && !/^0x0{64}$/.test(v.anchor) && Number.isFinite(v.fetchedAt) ? v : null;
+};
+export const saveSettlementAnchor = (anchor: string, fetchedAt: number) => write('sbr:settlement', { anchor, fetchedAt });

@@ -186,6 +186,36 @@ function pupAt(b: Board, s: GameState, i: number): number {
   return k >= 0 && s.pups & (1 << k) ? k : -1;
 }
 
+/** Preview the next beetle step with the current crates (or crates after a push).
+ * Actual moves use this same calculation, including wall reversal and blocked turns. */
+export function predictBeetles(b: Board, s: GameState, variant: Variant, crates = s.crates): Beetle[] {
+  const openAfter = gatesOpen(b, crates);
+  return s.beetles.map((be) => {
+    const can = (i: number) =>
+      i >= 0 && terrainOpen(b, i, variant, openAfter) && b.terrain[i] !== 'nest' && !crates.includes(i);
+    let { dx: bdx, dy: bdy } = be;
+    let n = neighbour(be.p, bdx, bdy);
+    if (!can(n)) {
+      bdx = -bdx;
+      bdy = -bdy;
+      n = neighbour(be.p, bdx, bdy);
+      if (!can(n)) return { p: be.p, dx: bdx, dy: bdy };
+    }
+    return { p: n, dx: bdx, dy: bdy };
+  });
+}
+
+/** Permanent crate corners only; gates are assumed open to avoid false warnings. */
+export function deadCorners(b: Board, variant: Variant): number[] {
+  const blocked = (i: number) => i < 0 || !terrainOpen(b, i, variant, true) || b.terrain[i] === 'nest';
+  return b.terrain.flatMap((_, i) => {
+    if (b.plates.includes(i) || blocked(i)) return [];
+    const vertical = blocked(neighbour(i, 0, -1)) || blocked(neighbour(i, 0, 1));
+    const horizontal = blocked(neighbour(i, -1, 0)) || blocked(neighbour(i, 1, 0));
+    return vertical && horizontal ? [i] : [];
+  });
+}
+
 /**
  * Apply one move. Returns null when the move is not legal (blocked), so it
  * costs nothing. Otherwise returns the next state (possibly won/caught/out).
@@ -218,21 +248,8 @@ export function step(b: Board, s: GameState, dir: Dir, rules: Rules): GameState 
   if (pups === 0 && t === b.nest) {
     return { h: t, pups, crates, beetles: s.beetles, moves, status: 'won' };
   }
-  const openAfter = gatesOpen(b, crates);
   let caught = s.beetles.some((be) => be.p === t);
-  const beetles = s.beetles.map((be) => {
-    const can = (i: number) =>
-      i >= 0 && terrainOpen(b, i, rules.variant, openAfter) && b.terrain[i] !== 'nest' && !crates.includes(i);
-    let { dx: bdx, dy: bdy } = be;
-    let n = neighbour(be.p, bdx, bdy);
-    if (!can(n)) {
-      bdx = -bdx;
-      bdy = -bdy;
-      n = neighbour(be.p, bdx, bdy);
-      if (!can(n)) return { p: be.p, dx: bdx, dy: bdy };
-    }
-    return { p: n, dx: bdx, dy: bdy };
-  });
+  const beetles = predictBeetles(b, s, rules.variant, crates);
   beetles.forEach((nb, j) => {
     const ob = s.beetles[j];
     if (nb.p === t || (ob.p === t) || (nb.p === s.h && ob.p === t)) caught = true;
