@@ -249,6 +249,7 @@ svg.wheel { width: 72px; height: 72px; flex: none; }
 @media (max-width: 30rem) {
   .top { padding-block: var(--space-1); }
   .top-actions .btn.ghost { padding: 0 var(--space-2); }
+  .result { position: static; margin-block-start: var(--space-3); }
   .controls { gap: var(--space-4); }
 }
 

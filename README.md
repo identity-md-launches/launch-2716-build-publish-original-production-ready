@@ -68,6 +68,14 @@ Use `webkit` instead of `chromium` after installing its browser and normal runti
 
 ## Validation and publication
 
+Revision check (2026-11-06): fixed the reproduced mobile win/copy overlap with one rule in the existing `30rem` media query. Results and selectable links now flow below the board, with a 12px gap; controls move down naturally. `scripts/check-result-layout.mjs` checks a fresh 23-move Level 1 win, copy success/rejection, complete fallback selection, Next level and offline result verification at 320, 390 and 480px in English and Chinese:
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=./test/scratch/browsers node scripts/check-result-layout.mjs ./test/scratch/tools/node_modules/playwright/index.mjs chromium
+```
+
+All 12 cases passed, as did the production build, separate typecheck, existing 161 tests, 15 Chromium production scenarios (including real settlement sharing), and 16 design probe checks. The dependency install and build ran in an isolated copy under `test/scratch/build/` using the unchanged manifest and lockfile; its final export was copied to `dist/`. Revision evidence and limitations are in [docs/VALIDATION.md](docs/VALIDATION.md) and `artifacts/revision/`. WebKit could not launch for this revision because required runtime libraries were unavailable; the WebKit results below are from the prior submission. The revised public build still requires the assignment publisher. No missing check or deployment result was fabricated.
+
 On 2026-11-06, production build and separate typecheck passed, **161/161 unit/integration tests passed**, and the pinned design probe passed **16/16 checks**. Chromium and WebKit passed **30/30 production interaction scenarios (15 each)**, including touch and keyboard wins, verified old/new replays, real settlement sharing, stale/offline recovery, hints, corner warnings, Chinese, 320–1440 reflow and 200% text enlargement. Browser evidence and the complete six-domain Better Interface review are in [docs/VALIDATION.md](docs/VALIDATION.md) and `artifacts/`. [DESIGN.md](DESIGN.md) documents the implemented system.
 
 The existing public site is [squeek-burrow-rescue-squeekchain.imd.site](https://squeek-burrow-rescue-squeekchain.imd.site/), associated with `squeek-burrow-rescue-squeekchain.identitymd.eth`. Its current HTML, JS, CSS, favicon and API responded with HTTP 200; the existing live build passed a Level 1 win and replay check. At validation time it still served the prior build. **Publishing the new export and checking it after publication remain the assignment publisher's step.** The submitted `dist/` is the replacement export for that same hostname. No publication success, live SPINNING observation, physical-device test or screen-reader test is fabricated.

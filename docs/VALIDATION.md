@@ -1,5 +1,48 @@
 # Validation record — 2026-11-06
 
+## Revision: mobile result sharing
+
+This section records the current revision; the original accepted submission's record follows below. Scope is finding `348409d040d73bc76f41318e025e38d318ac984a4d0088c49b9f9beb9f819778`. Only the result's mobile positioning changed in the application; game rules, links and dependencies retain their accepted implementation.
+
+**Reproduced and fixed.** On the original export at 320×700, English, unavailable API, default Nap, the exact `RRDDDDDLLUURRRRUUUDDDDR` sequence won in 23 moves. After copying, the panel started at y=268.59 (success) or y=247.59 (rejection); the HUD occupied y=223.19–362.78 and the board began at y=374.78. The screenshot confirmed the overlap. Source cause: absolute `.result` positioning at `src/styles.css:155`, with no narrow-screen override. The fix at `src/styles.css:252` uses `position: static; margin-block-start: var(--space-3)` inside the existing `max-width: 30rem` query, reusing its 12px token.
+
+After the fix, the board still spans y=374.78–662.78 and the result starts at y=674.78 for either copy outcome. The expanded result ends at y=1028.97 and the controls start at y=1040.97. HUD position/height and board position do not change when the link appears. Screenshots were viewed before and after the fix, and the final 390px and desktop entry screenshots were inspected.
+
+| Revision command/check | Actual outcome |
+| --- | --- |
+| `npm ci --prefix test/scratch/build --cache test/scratch/npm-cache --no-audit --no-fund` | Installed a copy of the unchanged project manifest/lockfile in scratch; no root dependency files changed |
+| `npm --prefix test/scratch/build run typecheck` | Exit 0 on the final source copy |
+| `npm --prefix test/scratch/build run build` | Exit 0; resulting complete export copied to `dist/` |
+| `npm --prefix test/scratch/build test` | Exit 0, all 161 tests in 5 files passed |
+| `PLAYWRIGHT_BROWSERS_PATH=./test/scratch/browsers node scripts/check-result-layout.mjs ./test/scratch/tools/node_modules/playwright/index.mjs chromium test/scratch/result-after` | Exit 0, 12/12 cases; no page errors or local resource failures |
+| `PLAYWRIGHT_BROWSERS_PATH=./test/scratch/browsers node test/scratch/build/scripts/check-browser.mjs ./test/scratch/tools/node_modules/playwright/index.mjs chromium --live` | Exit 0, all 15 existing production scenarios, plus the current public site's first-level win and replay |
+| `IMD_PLAYWRIGHT=./test/scratch/tools/node_modules/playwright/index.mjs PLAYWRIGHT_BROWSERS_PATH=./test/scratch/browsers node .imd/reads/skills/design-critic/scripts/taste.mjs --out test/scratch/taste` | Exit 0, 16/16 checks |
+
+The new regression exercises 320/390/480px × English/Chinese × clipboard success/rejection. Each case starts without a hash and with blocked status data, wins with keyboard input, taps Copy result link, checks result/board/HUD/control geometry before and after copying, selects the complete fallback URL, taps Next level, and verifies the shared result offline. All 390px starting screens expose the board and movement pad. The existing suite also exercises touch wins, Wheel/WASD, real settlement sharing, Daily compatibility, stale recovery, hints, hazards, Chinese, reduced motion and 200% text enlargement. The initial run on the original export failed the mobile layout assertions; the final run passes.
+
+### Revision review of the six domains
+
+The pinned Better Interface workflow, six core domains and documentation method were applied within this revision's surface. The existing cream/brown/teal illustrated burrow and type scale remain the design direction.
+
+| Domain | Checked for this revision | Limits |
+| --- | --- | --- |
+| Accessibility | Keyboard win, touch share/Next level, named selectable link input, focus selection, reduced-motion regression; existing skip-link/dialog checks pass | No screen reader, physical phone or exhaustive focus/forced-colors audit |
+| Layout | Confirmed high-severity overlap; fixed with normal flow and existing spacing token; geometry and screenshots at 320px, 390px entry, desktop; automated 480px and 320–1440 reflow | No browser-native zoom or exhaustive landscape sampling |
+| Writing | Success and actionable clipboard-failure messages remain intact in English/Chinese | No new copy or external translation review |
+| Typography | Result messages and buttons wrap at all three mobile widths; complete URL remains selectable; existing size scale retained | System font rendering varies by device |
+| Colors | Existing tokens retained; pinned probe passes measured entry-page contrast thresholds | No new blanket claim for illustration or every result-state color pair |
+| UI | Result grows downward; controls remain reachable; both copy outcomes, Next level and offline verification work; existing reduced-motion checks pass | Clipboard outcomes are controlled stubs, not OS permission tests; no 10%-speed animation inspection |
+
+### Revision evidence and remaining limitations
+
+`artifacts/revision/` contains original/final geometry JSON, actual 320px copy-success/rejection screenshots, final 390px/desktop screenshots, the current Chromium interaction report and the actual taste probe results. The isolated build source matches the delivered source; manifests, lockfile and build configuration were preserved. `DESIGN.md` now records mobile result flow. No cache, browser binary or temporary dependency is delivered.
+
+The assigned browser tool failed to start; local Playwright Chromium performed the rendered checks instead. WebKit launch was attempted and failed because required runtime libraries were unavailable: **no current-revision WebKit pass is claimed**. The original submission's WebKit results below remain historical. Initial root typecheck also failed with `tsc: not found`; installing/building the isolated copy resolved build validation without modifying root dependencies.
+
+The public hostname still serves the legacy build: the existing live check retrieved fresh public HTTP bytes with curl, rendered them at their original origin, won Level 1 and verified a replay. The new local export's settlement check used a freshly fetched real API anchor; synthetic stale/spinning/outage responses were restricted to controlled cases. Public publication and verification of the revised bytes remain pending the assignment publisher. No deployment, screenshot, data or successful check was fabricated. **Complete for the reported mobile defect and Chromium validation; WebKit and post-publication verification remain unperformed.**
+
+---
+
 ## Scope and outcome
 
 The existing Squeek Burrow Rescue was extended in place. Original level IDs, maps, rules and valid level/Daily result links remain compatible. Four chapters group the original 12 levels; four separate challenge maps support new Daily and Settlement Rescue. This grouping, a fixed Nap route for new Daily, and an ending after one rescue per original level are the ordinary product choices inferred from the brief. Route mastery is tracked separately.

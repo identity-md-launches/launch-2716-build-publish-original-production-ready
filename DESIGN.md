@@ -48,7 +48,7 @@ English and Chinese update the document's `lang`. Board summaries, direction con
 
 Spacing tokens are 4, 8, 12, 16 and 24px (`--space-1`, `-2`, `-3`, `-4`, `-6`). Related controls generally use 8–12px gaps; cards and major groups use 16–24px.
 
-The header and `.layout` share a 1120px maximum width and 16px inline padding. The layout is a single column until `60rem`, then uses `minmax(0, 1fr) 340px`. Side content follows the game in DOM and mobile reading order. At `30rem` and below, header padding and control gaps tighten; utilities wrap beneath the brand.
+The header and `.layout` share a 1120px maximum width and 16px inline padding. The layout is a single column until `60rem`, then uses `minmax(0, 1fr) 340px`. Side content follows the game in DOM and mobile reading order. At `30rem` and below, header padding and control gaps tighten; utilities wrap beneath the brand. Results use `position: static` and `margin-block-start: var(--space-3)` (12px), flowing below the board. Expanding the copied-link message moves the following controls down without covering the HUD or board.
 
 `.modes` uses `repeat(auto-fit, minmax(min(100%, 7rem), 1fr))`: three columns fit at 390px with normal text, while narrower screens or enlarged text wrap the buttons into fewer columns. It is based on content size rather than a fixed phone breakpoint. The skip link is translated completely above the viewport until focused, including when text is enlarged.
 
@@ -58,7 +58,7 @@ New challenges return focus and scrolling to the game. Strategy and source detai
 
 ## Elevation & Depth
 
-`.card` uses `--shadow-card`: `0 1px 2px rgb(59 36 22 / .06), 0 4px 14px rgb(59 36 22 / .07)`, with no border. Current mode and level use an outline or structural selection border rather than another shadow. The result overlay uses `0 8px 30px rgb(59 36 22 / .25)` and sits over the lower board. The native dialog uses a `rgb(59 36 22 / .5)` backdrop. Warning and ending panels use tonal backgrounds without nested cards.
+`.card` uses `--shadow-card`: `0 1px 2px rgb(59 36 22 / .06), 0 4px 14px rgb(59 36 22 / .07)`, with no border. Current mode and level use an outline or structural selection border rather than another shadow. The result uses `0 8px 30px rgb(59 36 22 / .25)` and sits over the lower board above `30rem`; at smaller widths it takes space below the board. The native dialog uses a `rgb(59 36 22 / .5)` backdrop. Warning and ending panels use tonal backgrounds without nested cards.
 
 ## Shapes
 
